@@ -48,7 +48,7 @@ func main() {
 	mjpegstreamer.StartStream(host, port, &d)
 }
 ```
-To watch the stream point your browser to:
+To watch the stream, point your browser to:
 ```bash
 http://127.0.0.1:4000
 ```
