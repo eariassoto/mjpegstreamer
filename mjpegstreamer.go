@@ -40,53 +40,78 @@ const (
 		<title>MJPEG data stream</title>
 	</head>
 	<body>
-		<img src="/mjpeg">
+		<img src="/desktop">
 	</body>
 	</html>
 	`
 )
 
-var (
-	stream     *mjpeg.Stream
-	streamChan chan []byte
-)
-
-// StreamSource provides the source data. Data will be feeded to the streamer
-// through the data channel
-type StreamSource interface {
-	StartSourceStream(dataChan chan<- []byte)
+type MjpegStreamer struct {
+	serveMux *http.ServeMux
+	sources  map[string]*Stream
 }
 
-// StartStream initiates data stream in address host:port
-func StartStream(host string, port int, source StreamSource) {
-	address := fmt.Sprintf("%s:%d", host, port)
-	streamChan = make(chan []byte)
+type Stream struct {
+	Name        string
+	sourceData  chan []byte
+	done        chan bool
+	mjpegstream *mjpeg.Stream
+}
 
-	// create the mjpeg stream
-	stream = mjpeg.NewStream()
-
-	// start source data update function
-	go source.StartSourceStream(streamChan)
-
-	go updateStream(streamChan)
-
-	serveMux := http.NewServeMux()
-
-	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		io.WriteString(w, indexTemplate)
-	})
-
-	serveMux.Handle("/mjpeg", stream)
-
-	log.Printf("Starting data streaming on %s\n", address)
-	if err := http.ListenAndServe(address, serveMux); nil != err {
-		log.Printf("Error: %s", err.Error())
+func (s *Stream) updateStream() {
+	for {
+		select {
+		case data := <-s.sourceData:
+			s.mjpegstream.UpdateJPEG(data)
+		case <-s.done:
+			return
+		}
 	}
 }
 
-func updateStream(streamChan <-chan []byte) {
-	for {
-		data := <-streamChan
-		stream.UpdateJPEG(data)
+func (s *Stream) stopStream() {
+	s.done <- true
+}
+
+func NewMjpegStreamer() *MjpegStreamer {
+	var streamer MjpegStreamer
+	streamer.sources = make(map[string]*Stream)
+	streamer.serveMux = http.NewServeMux()
+
+	streamer.serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, indexTemplate)
+	})
+
+	return &streamer
+}
+
+func newStream(name string, sourceData chan []byte) *Stream {
+	var stream Stream
+	stream.Name = name
+	stream.sourceData = sourceData
+	stream.mjpegstream = mjpeg.NewStream()
+	return &stream
+}
+
+func (s *MjpegStreamer) AddStream(name string, sourceData chan []byte) {
+	stream := newStream(name, sourceData)
+	s.sources[name] = stream
+	go stream.updateStream()
+	s.serveMux.Handle(fmt.Sprintf("/%s", name), stream.mjpegstream)
+}
+
+func (s *MjpegStreamer) StopStream(name string) {
+	stream, ok := s.sources[name]
+	if ok {
+		stream.stopStream()
+		delete(s.sources, name)
+	}
+}
+
+func (s *MjpegStreamer) StartStream() {
+	address := "127.0.0.1:4000"
+	log.Printf("Starting data streaming on %s\n", address)
+	if err := http.ListenAndServe(address, s.serveMux); nil != err {
+		log.Printf("Error: %s", err.Error())
 	}
 }

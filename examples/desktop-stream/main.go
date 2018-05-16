@@ -32,9 +32,7 @@ import (
 	"github.com/eariassoto/mjpegstreamer"
 )
 
-type desktopDataSource struct{}
-
-func (d *desktopDataSource) StartSourceStream(dataChan chan<- []byte) {
+func startSourceStream(dataChan chan<- []byte) {
 	for {
 		command := exec.Command("avconv",
 			"-f", "x11grab",
@@ -59,8 +57,13 @@ func (d *desktopDataSource) StartSourceStream(dataChan chan<- []byte) {
 }
 
 func main() {
-	host := "127.0.0.1"
-	port := 4000
-	var d desktopDataSource
-	mjpegstreamer.StartStream(host, port, &d)
+	//host := "127.0.0.1"
+	//port := 4000
+
+	streamer := mjpegstreamer.NewMjpegStreamer()
+	sourceChan := make(chan []byte)
+
+	streamer.AddStream("desktop", sourceChan)
+	go startSourceStream(sourceChan)
+	streamer.StartStream()
 }
